@@ -9,59 +9,62 @@ require 'mechanize'
 
 $db = SQLite3::Database.new('edgar.sqlite')
 $db.execute "CREATE TABLE IF NOT EXISTS SECFilings(
-  cik     INTEGER NOT NULL,
-  form    VARCHAR(12) NOT NULL,
-  doclink VARCHAR(256) NOT NULL,
-  comlink VARCHAR(256) NOT NULL,
-  date    DATE NOT NULL)"
+  cik_code    VARCHAR NOT NULL, 
+  form_type   VARCHAR NOT NULL, 
+  doc_link    VARCHAR NOT NULL UNIQUE, 
+  com_link    VARCHAR NOT NULL, 
+  filing_date DATE NOT NULL)"
 
 $agent = Mechanize.new
 $base_url = "http://www.sec.gov"
-$filing_a = []
+$form_type_a = ["N-Q", "497", "497K", "485APOS", "485BPOS", "10-K", "10-Q", "8-K"]
 
 # fetch the starting page...
 $agent.get("#{$base_url}/edgar/searchedgar/currentevents.htm") do |search_page|
   results_page = search_page.form_with(:action=>"/cgi-bin/current.pl") do |form|
     form['q1']="0"
     form['q2']="6"
-    form['q3']="N-Q"
+    #form['q3']="N-Q"
   end.submit
 
   # process the results page which contains a table of latest filings...
+  puts results_page.parser.css('p').text.strip
   anchor_a = results_page.parser.css('pre a').to_a
-  hash = Hash.new
+  form_type = nil
+  form_link = nil
+  cik_code = nil
+  filing_date = nil
   anchor_a.each_index do |i|
     if i.even?
       # new filing...
-      hash = Hash.new
-      hash[:FormType] = anchor_a[i].text.strip # N-Q
-      hash[:FormURL] = anchor_a[i]['href']
+      form_type = anchor_a[i].text.strip # N-Q
+      form_link = anchor_a[i]['href']
     else
-      hash[:CIK] = anchor_a[i].text.strip
-      hash[:CompanyURL] = anchor_a[i]['href']
-      $filing_a << hash
+      # fetch filings only for the desired form types...
+      if form_type and $form_type_a.include?(form_type)
+        cik_code = anchor_a[i].text.strip
+        com_link = anchor_a[i]['href']
+
+        # fetch the document link for each filing...
+        url = $base_url+form_link
+        page = Nokogiri::HTML(open(url))
+        filing_date = page.css('div.formContent div.formGrouping div.info')[0].text.strip
+        doc_link = page.css('table.tableFile tr td a')[0]['href']
+        puts "#{cik_code},#{form_type},#{doc_link},#{com_link},#{filing_date}"
+        # update db
+        if cik_code and form_type and doc_link and com_link and filing_date
+          $db.execute "INSERT OR IGNORE INTO SECFilings 
+            VALUES 
+            (?,?,?,?,?)",
+            [
+              cik_code,
+              form_type,
+              $base_url+doc_link,
+              $base_url+com_link,
+              filing_date
+            ]
+        end
+      end
     end
   end
-
-  # fetch the document link for each filing...
-  $filing_a.each do |hash|
-    url = $base_url+hash[:FormURL]
-    page = Nokogiri::HTML(open(url))
-    hash[:FilingDate] = page.css('div.formContent div.formGrouping div.info')[0].text.strip
-    hash[:DocumentURL] = page.css('table.tableFile tr td a')[0]['href']
-  end
-  
-  # update db
-  $filing_a.each do |hash|
-    $db.execute "INSERT INTO SECFilings 
-      VALUES 
-      (?,?,?,?,?)",
-      [
-        hash[:CIK],
-        hash[:FormType],
-        $base_url+hash[:DocumentURL],
-        $base_url+hash[:CompanyURL],
-        hash[:FilingDate]
-      ]
-  end  
 end
