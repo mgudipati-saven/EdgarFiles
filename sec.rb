@@ -17,7 +17,7 @@ $db.execute "CREATE TABLE IF NOT EXISTS SECFilings(
 
 $agent = Mechanize.new
 $base_url = "http://www.sec.gov"
-$form_type_a = ["N-Q", "497", "497K", "485APOS", "485BPOS", "10-K", "10-Q", "8-K"]
+$form_type_a = ["N-Q", "497K", "485APOS"]
 
 # fetch the starting page...
 $agent.get("#{$base_url}/edgar/searchedgar/currentevents.htm") do |search_page|
