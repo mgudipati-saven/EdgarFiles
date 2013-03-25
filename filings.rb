@@ -9,11 +9,13 @@ require 'mechanize'
 
 $db = SQLite3::Database.new('edgar.sqlite')
 $db.execute "CREATE TABLE IF NOT EXISTS SECFilings(
-  cik_code    VARCHAR NOT NULL, 
+  filing_date DATE NOT NULL,
   form_type   VARCHAR NOT NULL, 
   doc_link    VARCHAR NOT NULL UNIQUE, 
-  com_link    VARCHAR NOT NULL, 
-  filing_date DATE NOT NULL)"
+  cik_code    VARCHAR NOT NULL, 
+  series_num  VARCHAR,
+  tickers     VARCHAR
+  )"
 
 $agent = Mechanize.new
 $base_url = "http://www.sec.gov"
@@ -32,8 +34,6 @@ $agent.get("#{$base_url}/edgar/searchedgar/currentevents.htm") do |search_page|
   anchor_a = results_page.parser.css('pre a').to_a
   form_type = nil
   form_link = nil
-  cik_code = nil
-  filing_date = nil
   anchor_a.each_index do |i|
     if i.even?
       # new filing...
@@ -50,18 +50,28 @@ $agent.get("#{$base_url}/edgar/searchedgar/currentevents.htm") do |search_page|
         page = Nokogiri::HTML(open(url))
         filing_date = page.css('div.formContent div.formGrouping div.info')[0].text.strip
         doc_link = page.css('table.tableFile tr td a')[0]['href']
-        puts "#{cik_code},#{form_type},#{doc_link},#{com_link},#{filing_date}"
+        series_num = page.css('td.seriesName a').text.strip
+        series_name = page.css('td.seriesCell').text.strip
+
+        crows = page.css('tr.contractRow')[0..-1]
+        tickers = []
+        crows.each do |row|
+          tickers << row.css('td')[3].text.strip
+        end
+
+        puts "#{filing_date},#{form_type},#{doc_link},#{cik_code},#{series_num},#{tickers.join(",")}"
         # update db
         if cik_code and form_type and doc_link and com_link and filing_date
           $db.execute "INSERT OR IGNORE INTO SECFilings 
             VALUES 
-            (?,?,?,?,?)",
+            (?,?,?,?,?,?)",
             [
-              cik_code,
+              filing_date,
               form_type,
               $base_url+doc_link,
-              $base_url+com_link,
-              filing_date
+              cik_code,
+              series_num,
+              tickers.join(",")
             ]
         end
       end
